@@ -5,6 +5,12 @@ Imagine joining a company as a fresher or a working professional and needing to 
 
 **NoteBot - Notes Retrieval System** solves this problem by acting as a personalized chatbot for your uploaded PDFs, making information retrieval seamless and efficient.
 
+## Project Live at Hugging Face Spaces 🤗
+```
+https://huggingface.co/spaces/I-AdityaGoyal/NoteBot
+
+```
+
 ## Project Structure 📁
 
 ```plaintext
