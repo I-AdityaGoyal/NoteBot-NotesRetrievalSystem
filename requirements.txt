@@ -6,4 +6,3 @@ sentence-transformers
 python-dotenv
 requests
 langchain
-python
