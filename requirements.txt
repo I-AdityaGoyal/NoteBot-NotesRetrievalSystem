@@ -6,3 +6,7 @@ sentence-transformers
 python-dotenv
 requests
 langchain
+youtube-transcript-api
+speechrecognition
+fpdf
+pyttsx3

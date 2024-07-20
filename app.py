@@ -1,74 +1,25 @@
 import streamlit as st
-import fitz  # PyMuPDF
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
 import os
-from dotenv import load_dotenv
-import requests
+
+from pdf_processing import extract_text_from_pdf
+from youtube_processing import extract_text_from_youtube
+from faiss_indexing import get_embeddings, create_faiss_index, query_faiss_index
+from utils import load_environment_variables, query_huggingface_api, chunk_text
+from pdf_generator import generate_pdf
+from text_to_speech import speak_text
+from sentence_transformers import SentenceTransformer
 
 # Load environment variables
-load_dotenv()
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-# Check environment variable
-print("HF_TOKEN:", HF_TOKEN)
+hf_token = load_environment_variables()
+if not hf_token:
+    st.error("Hugging Face API token is missing. Please add it to your .env file.")
+    st.stop()
 
 # Define the Hugging Face API endpoint
 API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-
 headers = {
-    "Authorization": f"Bearer {HF_TOKEN}"
+    "Authorization": f"Bearer {hf_token}"
 }
-
-def extract_text_from_pdf(pdf_path):
-    try:
-        pdf_document = fitz.open(pdf_path)
-        text = ""
-        for page_num in range(len(pdf_document)):
-            page = pdf_document.load_page(page_num)
-            text += page.get_text()
-        pdf_document.close()
-        return text
-    except Exception as e:
-        print(f"Error extracting text from PDF: {e}")
-        return ""
-
-def chunk_text(text, chunk_size=1000):
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-    return chunks
-
-def get_embeddings(texts, model):
-    embeddings = model.encode(texts, convert_to_tensor=True)
-    return embeddings
-
-def create_faiss_index(embeddings):
-    embeddings_np = embeddings.cpu().numpy()  # Move to CPU and convert to numpy
-    dim = embeddings_np.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    faiss_index = faiss.IndexIDMap(index)
-    faiss_index.add_with_ids(embeddings_np, np.arange(len(embeddings_np)))
-    return faiss_index
-
-def query_faiss_index(index, query_embedding, k=5):
-    query_embedding_np = query_embedding.cpu().numpy()  # Move to CPU and convert to numpy
-    distances, indices = index.search(query_embedding_np, k)
-    return distances, indices
-
-def query_huggingface_api(prompt):
-    response = requests.post(API_URL, headers=headers, json={"inputs": prompt})
-    if response.status_code == 200:
-        generated_text = response.json()[0]['generated_text']
-        # Extract only the final answer
-        answer_start = generated_text.find("Answer: ")
-        if answer_start != -1:
-            answer = generated_text[answer_start + len("Answer: "):].strip()
-        else:
-            answer = generated_text
-        return answer
-    else:
-        print(f"Error {response.status_code}: {response.text}")
-        return "Error in API request"
 
 # Initialize the sentence transformer model
 model_name = 'all-MiniLM-L6-v2'
@@ -77,12 +28,15 @@ model = SentenceTransformer(model_name)
 # Streamlit UI
 st.title("NoteBot - Notes Retrieval System")
 st.write("By - Aditya Goyal")
-st.write("Upload PDFs and ask questions about their content.")
+st.write("Upload PDFs or provide YouTube links to ask questions about their content.")
 
 uploaded_files = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+youtube_url = st.text_input("Enter YouTube video URL:")
 
+all_chunks = []
+
+# Process PDF files
 if uploaded_files:
-    all_chunks = []
     for uploaded_file in uploaded_files:
         pdf_path = os.path.join("temp", uploaded_file.name)
         if not os.path.exists("temp"):
@@ -93,6 +47,13 @@ if uploaded_files:
         chunks = chunk_text(text)
         all_chunks.extend(chunks)
 
+# Process YouTube video
+if youtube_url:
+    yt_text = extract_text_from_youtube(youtube_url)
+    yt_chunks = chunk_text(yt_text)
+    all_chunks.extend(yt_chunks)
+
+if all_chunks:
     embeddings = get_embeddings(all_chunks, model)
     faiss_index = create_faiss_index(embeddings)
     
@@ -113,6 +74,20 @@ if uploaded_files:
         prompt_text = template.format(similar_chunks="\n".join(selected_chunks), question=query_text)
         
         # Generate response from Hugging Face API
-        response = query_huggingface_api(prompt_text)
+        response = query_huggingface_api(prompt_text, API_URL, headers)
         
-        st.write("**Answer:**", response)
+        if "Error" not in response:
+            st.write("**Answer:**", response)
+
+            # Add button to download response as PDF
+            if st.button("Download Response as PDF"):
+                pdf_path = os.path.join("temp", "response.pdf")
+                generate_pdf(response, pdf_path)
+                with open(pdf_path, "rb") as f:
+                    st.download_button(label="Download PDF", data=f, file_name="response.pdf")
+
+            # Add button to speak the response text
+            if st.button("Speak Response"):
+                speak_text(response)
+        else:
+            st.error(response)
